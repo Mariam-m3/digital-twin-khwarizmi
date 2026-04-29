@@ -266,23 +266,29 @@ with st.sidebar:
 
     selected_equipment = st.selectbox("**Select Equipment**", equipment_list)
 
-    temp = st.slider("🌡️ Temperature (°C)", 0.0, 80.0, 30.0, 0.5)
-    vib = st.slider("📳 Vibration (mm/s)", 0.0, 2.0, 0.2, 0.05)
-    current = st.slider("⚡ Current (A)", 0.0, 30.0, 10.0, 0.5)
-    pressure = st.slider("⏲️ Pressure (psi)", 0.0, 200.0, 110.0, 1.0)
-    age = st.slider("🔋 Equipment Age (years)", 0.0, 20.0, 3.0, 0.5)
+    # Manual controls (used only in Manual mode)
+    temp_slider = st.slider("🌡️ Temperature (°C)", 0.0, 80.0, 30.0, 0.5)
+    vib_slider = st.slider("📳 Vibration (mm/s)", 0.0, 2.0, 0.2, 0.05)
+    current_slider = st.slider("⚡ Current (A)", 0.0, 30.0, 10.0, 0.5)
+    pressure_slider = st.slider("⏲️ Pressure (psi)", 0.0, 200.0, 110.0, 1.0)
+    age_slider = st.slider("🔋 Equipment Age (years)", 0.0, 20.0, 3.0, 0.5)
 
     st.markdown("---")
     mode = st.radio("Operation Mode", ["Manual", "Auto"], horizontal=True)
 
     if mode == "Auto":
-        st.caption("Calculate equipment condition based on current Baghdad temperature (one‑time evaluation).")
+        st.caption("Auto mode uses the current real temperature of Baghdad (fetched live). No manual override.")
         if st.button("▶️ Start Simulation", use_container_width=True):
-            # In Auto mode, we ignore sliders and use real temperature
+            # Fetch real temperature from weather API
+            real_temp = get_current_temperature()
+            if real_temp is None:
+                real_temp = 35  # fallback
             st.session_state['auto_mode'] = True
-    else:
+            st.session_state['auto_temp'] = real_temp
+            st.session_state['auto_equipment'] = selected_equipment
+    else:  # Manual mode
         if st.button("🔮 Evaluate Condition", type="primary", use_container_width=True):
-            st.session_state['input_data'] = [temp, vib, current, pressure, age, selected_equipment]
+            st.session_state['input_data'] = [temp_slider, vib_slider, current_slider, pressure_slider, age_slider, selected_equipment]
             st.session_state['manual_mode'] = True
 
     st.markdown("---")
@@ -332,36 +338,33 @@ with col_left:
             temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp = st.session_state['input_data']
             status_disp, color_disp, health_score_disp = evaluate_health(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp)
             display_data = True
-        # Clear flag after showing
         st.session_state['manual_mode'] = False
 
     elif 'auto_mode' in st.session_state and st.session_state.get('auto_mode'):
-        real_temp = get_current_temperature()
-        if real_temp is None:
-            real_temp = 35  # fallback
-        # Compute ambient factor (used to scale degradation based on real temp)
-        ambient_factor = 1 + max(0, (real_temp - 20) * 0.01)
+        sim_temp = st.session_state.get('auto_temp', 35)
+        # Compute ambient factor based on that real temperature
+        ambient_factor = 1 + max(0, (sim_temp - 20) * 0.01)
         ambient_factor = min(ambient_factor, 2.0)
-        # Apply formulas to estimate equipment parameters
-        temp_disp = 25 + (real_temp * ambient_factor)
+
+        temp_disp = 25 + (sim_temp * ambient_factor)
         vib_disp = 0.2 + 1.5 * ambient_factor
         current_disp = 10 + 15 * ambient_factor
         pressure_disp = 110 - 60 * ambient_factor
         age_disp = 3 + 12 * ambient_factor
-        # Apply bounds
+
         temp_disp = min(temp_disp, 80)
         vib_disp = min(vib_disp, 2.0)
         current_disp = min(current_disp, 30)
         pressure_disp = max(pressure_disp, 50)
         age_disp = min(age_disp, 20)
-        device_disp = selected_equipment
+
+        device_disp = st.session_state.get('auto_equipment', selected_equipment)
         status_disp, color_disp, health_score_disp = evaluate_health(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp)
         display_data = True
         st.session_state['auto_mode'] = False
-        st.success(f"✅ Simulation based on current Baghdad temperature ({real_temp:.1f}°C) completed.")
+        st.success(f"✅ Simulation based on current Baghdad temperature ({sim_temp:.1f}°C) completed.")
 
     if display_data:
-        # Display metrics in two rows of three
         cols = st.columns(3)
         cols[0].metric("🌡️ Temperature", f"{temp_disp:.1f} °C")
         cols[1].metric("📳 Vibration", f"{vib_disp:.2f} mm/s")
@@ -373,7 +376,6 @@ with col_left:
 
         st.markdown(f"### Equipment Condition: <span style='color:{color_disp}'>{status_disp}</span>", unsafe_allow_html=True)
 
-        # Gauge chart
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=health_score_disp,
@@ -402,7 +404,6 @@ with col_left:
         for rec in get_recommendations(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp):
             st.markdown(f"- {rec}")
 
-        # Save to history
         if 'history' not in st.session_state:
             st.session_state['history'] = []
         st.session_state['history'].append({
