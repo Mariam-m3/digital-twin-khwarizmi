@@ -164,8 +164,7 @@ OPTIMAL_CONDITIONS = {
 equipment_list = list(OPTIMAL_CONDITIONS.keys())
 
 # ============================================================
-# Weather function using wttr.in (no API key needed)
-# Returns current temperature in Celsius or None if error
+# Weather function to get current temperature (for auto mode)
 # ============================================================
 @st.cache_data(ttl=1800)  # cache for 30 minutes
 def get_current_temperature():
@@ -179,11 +178,10 @@ def get_current_temperature():
         temp_c = float(current['temp_C'])
         return temp_c
     except Exception as e:
-        # If weather fetch fails, return None (will use default)
         return None
 
 # ============================================================
-# Weather display function (for sidebar or right column)
+# Weather display function (for right column)
 # ============================================================
 @st.cache_data(ttl=1800)
 def get_weather_baghdad():
@@ -278,15 +276,14 @@ with st.sidebar:
     mode = st.radio("Operation Mode", ["Manual", "Auto"], horizontal=True)
 
     if mode == "Auto":
-        st.caption("Simulating equipment degradation over 10 steps based on real Baghdad temperature.")
+        st.caption("Calculate equipment condition based on current Baghdad temperature (one‑time evaluation).")
         if st.button("▶️ Start Simulation", use_container_width=True):
-            st.session_state['auto_run'] = True
-            st.session_state['step'] = 0
-            st.session_state['auto_equipment'] = selected_equipment
+            # In Auto mode, we ignore sliders and use real temperature
+            st.session_state['auto_mode'] = True
     else:
         if st.button("🔮 Evaluate Condition", type="primary", use_container_width=True):
             st.session_state['input_data'] = [temp, vib, current, pressure, age, selected_equipment]
-            st.session_state['predict'] = True
+            st.session_state['manual_mode'] = True
 
     st.markdown("---")
     opts = OPTIMAL_CONDITIONS[selected_equipment]
@@ -325,68 +322,66 @@ with col_left:
     st.markdown("## 📟 Equipment Status")
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    if 'predict' in st.session_state or 'auto_run' in st.session_state:
-        if 'auto_run' in st.session_state and st.session_state.get('step', 0) < 10:
-            step = st.session_state['step']
-            # Get real Baghdad temperature for realistic degradation
-            real_temp = get_current_temperature()
-            if real_temp is None:
-                real_temp = 35  # default fallback
-            
-            # Ambient factor: higher temperature accelerates degradation
-            # Factor increases by 1% per degree above 20°C, max 2.0
-            ambient_factor = 1 + max(0, (real_temp - 20) * 0.01)
-            ambient_factor = min(ambient_factor, 2.0)
-            
-            # Degradation formulas based on real temperature
-            temp = 25 + (real_temp * ambient_factor) * (step / 10)
-            vib = 0.2 + 1.5 * (step / 10) * ambient_factor
-            current = 10 + 15 * (step / 10) * ambient_factor
-            pressure = 110 - 60 * (step / 10) * ambient_factor
-            age = 3 + 12 * (step / 10) * ambient_factor
-            
-            # Apply bounds
-            temp = min(temp, 80)
-            vib = min(vib, 2.0)
-            current = min(current, 30)
-            pressure = max(pressure, 50)
-            age = min(age, 20)
-            
-            device = st.session_state.get('auto_equipment', selected_equipment)
-            st.session_state['step'] = step + 1
-            if step >= 9:
-                st.session_state['auto_run'] = False
-                st.success("✅ Simulation completed!")
-        else:
-            if 'input_data' in st.session_state:
-                temp, vib, current, pressure, age, device = st.session_state['input_data']
-            else:
-                st.info("👈 Select parameters and click Evaluate Condition")
-                st.stop()
+    display_data = False
+    temp_disp = vib_disp = current_disp = pressure_disp = age_disp = None
+    device_disp = None
+    status_disp = color_disp = health_score_disp = None
 
-        status, color, health_score = evaluate_health(temp, vib, current, pressure, age, device)
+    if 'manual_mode' in st.session_state and st.session_state.get('manual_mode'):
+        if 'input_data' in st.session_state:
+            temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp = st.session_state['input_data']
+            status_disp, color_disp, health_score_disp = evaluate_health(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp)
+            display_data = True
+        # Clear flag after showing
+        st.session_state['manual_mode'] = False
 
+    elif 'auto_mode' in st.session_state and st.session_state.get('auto_mode'):
+        real_temp = get_current_temperature()
+        if real_temp is None:
+            real_temp = 35  # fallback
+        # Compute ambient factor (used to scale degradation based on real temp)
+        ambient_factor = 1 + max(0, (real_temp - 20) * 0.01)
+        ambient_factor = min(ambient_factor, 2.0)
+        # Apply formulas to estimate equipment parameters
+        temp_disp = 25 + (real_temp * ambient_factor)
+        vib_disp = 0.2 + 1.5 * ambient_factor
+        current_disp = 10 + 15 * ambient_factor
+        pressure_disp = 110 - 60 * ambient_factor
+        age_disp = 3 + 12 * ambient_factor
+        # Apply bounds
+        temp_disp = min(temp_disp, 80)
+        vib_disp = min(vib_disp, 2.0)
+        current_disp = min(current_disp, 30)
+        pressure_disp = max(pressure_disp, 50)
+        age_disp = min(age_disp, 20)
+        device_disp = selected_equipment
+        status_disp, color_disp, health_score_disp = evaluate_health(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp)
+        display_data = True
+        st.session_state['auto_mode'] = False
+        st.success(f"✅ Simulation based on current Baghdad temperature ({real_temp:.1f}°C) completed.")
+
+    if display_data:
         # Display metrics in two rows of three
         cols = st.columns(3)
-        cols[0].metric("🌡️ Temperature", f"{temp:.1f} °C")
-        cols[1].metric("📳 Vibration", f"{vib:.2f} mm/s")
-        cols[2].metric("⚡ Current", f"{current:.1f} A")
+        cols[0].metric("🌡️ Temperature", f"{temp_disp:.1f} °C")
+        cols[1].metric("📳 Vibration", f"{vib_disp:.2f} mm/s")
+        cols[2].metric("⚡ Current", f"{current_disp:.1f} A")
         cols2 = st.columns(3)
-        cols2[0].metric("⏲️ Pressure", f"{pressure:.1f} psi")
-        cols2[1].metric("🔋 Age", f"{age:.1f} years")
-        cols2[2].metric("📈 Health Score", f"{health_score:.0f}%")
+        cols2[0].metric("⏲️ Pressure", f"{pressure_disp:.1f} psi")
+        cols2[1].metric("🔋 Age", f"{age_disp:.1f} years")
+        cols2[2].metric("📈 Health Score", f"{health_score_disp:.0f}%")
 
-        st.markdown(f"### Equipment Condition: <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
+        st.markdown(f"### Equipment Condition: <span style='color:{color_disp}'>{status_disp}</span>", unsafe_allow_html=True)
 
         # Gauge chart
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
-            value=health_score,
+            value=health_score_disp,
             domain={'x': [0, 1], 'y': [0, 1]},
             title={'text': "Health Index"},
             gauge={
                 'axis': {'range': [0, 100]},
-                'bar': {'color': color},
+                'bar': {'color': color_disp},
                 'steps': [
                     {'range': [0, 25], 'color': '#ffcdd2'},
                     {'range': [25, 50], 'color': '#ffb74d'},
@@ -396,7 +391,7 @@ with col_left:
                 'threshold': {
                     'line': {'color': 'black', 'width': 4},
                     'thickness': 0.75,
-                    'value': health_score
+                    'value': health_score_disp
                 }
             }
         ))
@@ -404,7 +399,7 @@ with col_left:
         st.plotly_chart(fig_gauge, use_container_width=True)
 
         st.markdown("### 💡 Maintenance Recommendations")
-        for rec in get_recommendations(temp, vib, current, pressure, age, device):
+        for rec in get_recommendations(temp_disp, vib_disp, current_disp, pressure_disp, age_disp, device_disp):
             st.markdown(f"- {rec}")
 
         # Save to history
@@ -412,14 +407,12 @@ with col_left:
             st.session_state['history'] = []
         st.session_state['history'].append({
             'Time': datetime.now().strftime("%H:%M:%S"),
-            'Equipment': device,
-            'Status': status,
-            'Score': health_score
+            'Equipment': device_disp,
+            'Status': status_disp,
+            'Score': health_score_disp
         })
-        if 'predict' in st.session_state:
-            st.session_state['predict'] = False
     else:
-        st.info("👈 Use the sidebar to adjust parameters and evaluate")
+        st.info("👈 Use the sidebar to adjust parameters (Manual) or click Start Simulation (Auto).")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
