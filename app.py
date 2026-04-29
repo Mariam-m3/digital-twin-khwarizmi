@@ -73,7 +73,7 @@ locations = [
     [CAMPUS_LAT - 0.0004, CAMPUS_LON - 0.0002], [CAMPUS_LAT + 0.0002, CAMPUS_LON + 0.0002]
 ]
 
-# Optimal conditions (updated for 3D Printer to accept 20°C)
+# Optimal conditions (updated for 3D Printer: 20-35)
 OPTIMAL_CONDITIONS = {
     '3D Printer': {'temp': (20, 35), 'vib': (0, 0.5), 'current': (5, 15), 'pressure': (100, 120)},
     'Engineering Workstations': {'temp': (30, 50), 'vib': (0, 0.3), 'current': (2, 8), 'pressure': (80, 100)},
@@ -223,7 +223,7 @@ with col_left:
         real_temp = st.session_state.get('auto_temp', 35)
         # Direct: device temperature = real ambient temperature
         t = real_temp
-        # Small effect on other parameters (optional, can be removed if you want only temperature)
+        # Small effect on other parameters (optional)
         excess = max(0, real_temp - 20)
         v = 0.2 + excess * 0.02
         c = 10 + excess * 0.2
@@ -339,16 +339,26 @@ with tab4:
     if 'last_result' in st.session_state:
         t, v, c, p, a, dev, _, _, _ = st.session_state['last_result']
         opts = OPTIMAL_CONDITIONS[dev]
-        ideal_mid = [(opts['temp'][0] + opts['temp'][1])/2,
-                     opts['vib'][1]/2,
-                     (opts['current'][0] + opts['current'][1])/2,
-                     (opts['pressure'][0] + opts['pressure'][1])/2,
-                     5]
-        values = [t, v, c, p, a]
-        factors = ['Temperature', 'Vibration', 'Current', 'Pressure', 'Age']
-        deviation = [abs(vals - mid) / mid if mid != 0 else 0 for vals, mid in zip(values, ideal_mid)]
-        fig = px.bar(x=factors, y=deviation, title="Relative Deviation from Optimal Values",
-                     color=deviation, color_continuous_scale='Reds')
+
+        # Ideal values for each factor (excluding age)
+        ideal_mid = [
+            (opts['temp'][0] + opts['temp'][1]) / 2,
+            opts['vib'][1] / 2,
+            (opts['current'][0] + opts['current'][1]) / 2,
+            (opts['pressure'][0] + opts['pressure'][1]) / 2
+        ]
+        # Age deviation: only penalize if age > 10 years
+        age_limit = 10
+        age_dev = max(0, a - age_limit) / age_limit if age_limit > 0 else 0.0
+
+        values = [t, v, c, p]
+        factors = ['Temperature', 'Vibration', 'Current', 'Pressure']
+        deviations = [abs(vals - mid) / mid if mid != 0 else 0.0 for vals, mid in zip(values, ideal_mid)]
+        deviations.append(age_dev)
+        factors.append('Age')
+
+        fig = px.bar(x=factors, y=deviations, title="Relative Deviation from Optimal Values",
+                     color=deviations, color_continuous_scale='Reds')
         fig.update_layout(yaxis_title="Deviation")
         st.plotly_chart(fig, use_container_width=True)
     else:
