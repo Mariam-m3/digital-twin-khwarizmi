@@ -165,10 +165,29 @@ equipment_list = list(OPTIMAL_CONDITIONS.keys())
 
 # ============================================================
 # Weather function using wttr.in (no API key needed)
+# Returns current temperature in Celsius or None if error
 # ============================================================
 @st.cache_data(ttl=1800)  # cache for 30 minutes
+def get_current_temperature():
+    """Fetch current temperature from wttr.in for Baghdad coordinates"""
+    url = f"https://wttr.in/{LAT},{LON}?format=j1"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        current = data['current_condition'][0]
+        temp_c = float(current['temp_C'])
+        return temp_c
+    except Exception as e:
+        # If weather fetch fails, return None (will use default)
+        return None
+
+# ============================================================
+# Weather display function (for sidebar or right column)
+# ============================================================
+@st.cache_data(ttl=1800)
 def get_weather_baghdad():
-    """Fetch current weather from wttr.in for Baghdad coordinates"""
+    """Fetch current weather details for display"""
     url = f"https://wttr.in/{LAT},{LON}?format=j1"
     try:
         response = requests.get(url, timeout=10)
@@ -259,7 +278,7 @@ with st.sidebar:
     mode = st.radio("Operation Mode", ["Manual", "Auto"], horizontal=True)
 
     if mode == "Auto":
-        st.caption("Simulating equipment degradation over 10 steps")
+        st.caption("Simulating equipment degradation over 10 steps based on real Baghdad temperature.")
         if st.button("▶️ Start Simulation", use_container_width=True):
             st.session_state['auto_run'] = True
             st.session_state['step'] = 0
@@ -309,12 +328,30 @@ with col_left:
     if 'predict' in st.session_state or 'auto_run' in st.session_state:
         if 'auto_run' in st.session_state and st.session_state.get('step', 0) < 10:
             step = st.session_state['step']
-            # Simulated degradation
-            temp = 30 + 30 * (step / 10)
-            vib = 0.2 + 1.5 * (step / 10)
-            current = 10 + 15 * (step / 10)
-            pressure = 110 - 60 * (step / 10)
-            age = 3 + 12 * (step / 10)
+            # Get real Baghdad temperature for realistic degradation
+            real_temp = get_current_temperature()
+            if real_temp is None:
+                real_temp = 35  # default fallback
+            
+            # Ambient factor: higher temperature accelerates degradation
+            # Factor increases by 1% per degree above 20°C, max 2.0
+            ambient_factor = 1 + max(0, (real_temp - 20) * 0.01)
+            ambient_factor = min(ambient_factor, 2.0)
+            
+            # Degradation formulas based on real temperature
+            temp = 25 + (real_temp * ambient_factor) * (step / 10)
+            vib = 0.2 + 1.5 * (step / 10) * ambient_factor
+            current = 10 + 15 * (step / 10) * ambient_factor
+            pressure = 110 - 60 * (step / 10) * ambient_factor
+            age = 3 + 12 * (step / 10) * ambient_factor
+            
+            # Apply bounds
+            temp = min(temp, 80)
+            vib = min(vib, 2.0)
+            current = min(current, 30)
+            pressure = max(pressure, 50)
+            age = min(age, 20)
+            
             device = st.session_state.get('auto_equipment', selected_equipment)
             st.session_state['step'] = step + 1
             if step >= 9:
