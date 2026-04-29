@@ -17,7 +17,7 @@ LON = 44.37339
 
 st.set_page_config(page_title="Digital Twin System - Al-Khwarizmi College", page_icon="🏛️", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS (unchanged, keep as in your working version)
+# Custom CSS (unchanged)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');
@@ -73,8 +73,9 @@ locations = [
     [CAMPUS_LAT - 0.0004, CAMPUS_LON - 0.0002], [CAMPUS_LAT + 0.0002, CAMPUS_LON + 0.0002]
 ]
 
+# Optimal conditions (updated for 3D Printer to accept 20°C)
 OPTIMAL_CONDITIONS = {
-    '3D Printer': {'temp': (25, 35), 'vib': (0, 0.5), 'current': (5, 15), 'pressure': (100, 120)},
+    '3D Printer': {'temp': (20, 35), 'vib': (0, 0.5), 'current': (5, 15), 'pressure': (100, 120)},
     'Engineering Workstations': {'temp': (30, 50), 'vib': (0, 0.3), 'current': (2, 8), 'pressure': (80, 100)},
     'Central HVAC': {'temp': (20, 30), 'vib': (0, 0.4), 'current': (10, 20), 'pressure': (150, 200)},
     'Promethean Displays': {'temp': (20, 35), 'vib': (0, 0.2), 'current': (1, 3), 'pressure': (50, 80)}
@@ -220,21 +221,23 @@ with col_left:
 
     elif 'auto_mode' in st.session_state and st.session_state.get('auto_mode'):
         real_temp = st.session_state.get('auto_temp', 35)
-        # NEW REALISTIC FORMULAS
-        heat_load = max(0, real_temp - 20)   # only excess above 20°C matters
-        t = 25 + heat_load * 1.5
-        v = 0.2 + heat_load * 0.05
-        c = 10 + heat_load * 0.5
-        p = 110 - heat_load * 2
-        a = 3 + heat_load * 0.2
+        # Direct: device temperature = real ambient temperature
+        t = real_temp
+        # Small effect on other parameters (optional, can be removed if you want only temperature)
+        excess = max(0, real_temp - 20)
+        v = 0.2 + excess * 0.02
+        c = 10 + excess * 0.2
+        p = 110 - excess * 1.0
+        a = 3 + excess * 0.1
+
         t = min(t, 80)
         v = min(v, 2.0)
         c = min(c, 30)
         p = max(p, 50)
         a = min(a, 20)
-        dev = st.session_state.get('auto_equipment', selected_equipment)
-        status, col, score = evaluate_health(t,v,c,p,a,dev)
-        st.session_state['last_result'] = (t,v,c,p,a,dev,status,col,score)
+        device_disp = st.session_state.get('auto_equipment', selected_equipment)
+        status, col, score = evaluate_health(t, v, c, p, a, device_disp)
+        st.session_state['last_result'] = (t, v, c, p, a, device_disp, status, col, score)
         display_data = True
         st.session_state['auto_mode'] = False
         st.success(f"✅ Simulation based on current Baghdad temperature ({real_temp:.1f}°C) completed.")
@@ -251,10 +254,23 @@ with col_left:
         c6.metric("📈 Health Score", f"{score:.0f}%")
         st.markdown(f"### Equipment Condition: <span style='color:{col}'>{status}</span>", unsafe_allow_html=True)
 
-        fig_gauge = go.Figure(go.Indicator(mode="gauge+number", value=score, domain={'x':[0,1],'y':[0,1]}, title={'text':"Health Index"},
-            gauge={'axis':{'range':[0,100]}, 'bar':{'color':col},
-                   'steps':[{'range':[0,25],'color':'#ffcdd2'},{'range':[25,50],'color':'#ffb74d'},{'range':[50,75],'color':'#fff3b0'},{'range':[75,100],'color':'#c8e6c9'}],
-                   'threshold':{'line':{'color':'black','width':4}, 'thickness':0.75, 'value':score}}))
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=score,
+            domain={'x':[0,1],'y':[0,1]},
+            title={'text':"Health Index"},
+            gauge={
+                'axis':{'range':[0,100]},
+                'bar':{'color':col},
+                'steps':[
+                    {'range':[0,25],'color':'#ffcdd2'},
+                    {'range':[25,50],'color':'#ffb74d'},
+                    {'range':[50,75],'color':'#fff3b0'},
+                    {'range':[75,100],'color':'#c8e6c9'}
+                ],
+                'threshold':{'line':{'color':'black','width':4},'thickness':0.75,'value':score}
+            }
+        ))
         fig_gauge.update_layout(height=250, margin=dict(l=20,r=20,t=50,b=20))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
@@ -292,28 +308,53 @@ with col_right:
         st.info("Weather data temporarily unavailable.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Bottom tabs (same as before, keep them)
+# Bottom tabs
 st.markdown("---")
 st.markdown("## 📈 Analytics & Statistics")
 tab1, tab2, tab3, tab4 = st.tabs(["📋 Evaluation Log", "📊 Optimal Conditions", "📉 Health Trend", "📊 Factor Deviation"])
+
 with tab1:
     if st.session_state.get('history'):
         st.dataframe(pd.DataFrame(st.session_state['history'][-20:]), use_container_width=True)
-    else: st.info("No history yet")
-    if st.button("🧹 Clear Log"): st.session_state['history'] = []; st.rerun()
+    else:
+        st.info("No history yet")
+    if st.button("🧹 Clear Log"):
+        st.session_state['history'] = []
+        st.rerun()
+
 with tab2:
     opt_df = pd.DataFrame([{'Equipment':d,'Optimal Temp (°C)':f"{opts['temp'][0]}-{opts['temp'][1]}",'Max Vibration (mm/s)':f"< {opts['vib'][1]}",'Optimal Current (A)':f"{opts['current'][0]}-{opts['current'][1]}",'Optimal Pressure (psi)':f"{opts['pressure'][0]}-{opts['pressure'][1]}"} for d,opts in OPTIMAL_CONDITIONS.items()])
     st.dataframe(opt_df, use_container_width=True)
+
 with tab3:
     if st.session_state.get('history'):
         df = pd.DataFrame(st.session_state['history'])
         fig = px.line(df, x=range(len(df)), y='Score', title="Health Index Over Time", markers=True)
         fig.update_layout(xaxis_title="Evaluation #", yaxis_title="Health Score")
         st.plotly_chart(fig, use_container_width=True)
-    else: st.info("Insufficient data")
-with tab4:
-    st.info("Evaluate an equipment first to see factor deviation.")
+    else:
+        st.info("Insufficient data")
 
+with tab4:
+    if 'last_result' in st.session_state:
+        t, v, c, p, a, dev, _, _, _ = st.session_state['last_result']
+        opts = OPTIMAL_CONDITIONS[dev]
+        ideal_mid = [(opts['temp'][0] + opts['temp'][1])/2,
+                     opts['vib'][1]/2,
+                     (opts['current'][0] + opts['current'][1])/2,
+                     (opts['pressure'][0] + opts['pressure'][1])/2,
+                     5]
+        values = [t, v, c, p, a]
+        factors = ['Temperature', 'Vibration', 'Current', 'Pressure', 'Age']
+        deviation = [abs(vals - mid) / mid if mid != 0 else 0 for vals, mid in zip(values, ideal_mid)]
+        fig = px.bar(x=factors, y=deviation, title="Relative Deviation from Optimal Values",
+                     color=deviation, color_continuous_scale='Reds')
+        fig.update_layout(yaxis_title="Deviation")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Evaluate an equipment first to see factor deviation.")
+
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; background: white; padding: 1.2rem; border-radius: 20px; border: 1px solid #e9edf4;">
