@@ -17,7 +17,7 @@ LON = 44.37339
 
 st.set_page_config(page_title="Digital Twin System - Al-Khwarizmi College", page_icon="🏛️", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS (unchanged, keep as in your working version)
+# Custom CSS (as before, keep from your working version)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');
@@ -220,21 +220,23 @@ with col_left:
 
     elif 'auto_mode' in st.session_state and st.session_state.get('auto_mode'):
         real_temp = st.session_state.get('auto_temp', 35)
-        # NEW REALISTIC FORMULAS
-        heat_load = max(0, real_temp - 20)   # only excess above 20°C matters
-        t = 25 + heat_load * 1.5
-        v = 0.2 + heat_load * 0.05
-        c = 10 + heat_load * 0.5
-        p = 110 - heat_load * 2
-        a = 3 + heat_load * 0.2
+        # Direct formulas: device temperature = real ambient temperature
+        t = real_temp                           # مباشرة بدون heat_load
+        excess = max(0, real_temp - 20)         # الزيادة عن 20°C
+        v = 0.2 + excess * 0.02                 # اهتزاز
+        c = 10 + excess * 0.2                   # تيار
+        p = 110 - excess * 1.0                  # ضغط
+        a = 3 + excess * 0.1                    # عمر
+
+        # Apply bounds
         t = min(t, 80)
         v = min(v, 2.0)
         c = min(c, 30)
         p = max(p, 50)
         a = min(a, 20)
-        dev = st.session_state.get('auto_equipment', selected_equipment)
-        status, col, score = evaluate_health(t,v,c,p,a,dev)
-        st.session_state['last_result'] = (t,v,c,p,a,dev,status,col,score)
+        device_disp = st.session_state.get('auto_equipment', selected_equipment)
+        status, col, score = evaluate_health(t, v, c, p, a, device_disp)
+        st.session_state['last_result'] = (t, v, c, p, a, device_disp, status, col, score)
         display_data = True
         st.session_state['auto_mode'] = False
         st.success(f"✅ Simulation based on current Baghdad temperature ({real_temp:.1f}°C) completed.")
@@ -251,10 +253,23 @@ with col_left:
         c6.metric("📈 Health Score", f"{score:.0f}%")
         st.markdown(f"### Equipment Condition: <span style='color:{col}'>{status}</span>", unsafe_allow_html=True)
 
-        fig_gauge = go.Figure(go.Indicator(mode="gauge+number", value=score, domain={'x':[0,1],'y':[0,1]}, title={'text':"Health Index"},
-            gauge={'axis':{'range':[0,100]}, 'bar':{'color':col},
-                   'steps':[{'range':[0,25],'color':'#ffcdd2'},{'range':[25,50],'color':'#ffb74d'},{'range':[50,75],'color':'#fff3b0'},{'range':[75,100],'color':'#c8e6c9'}],
-                   'threshold':{'line':{'color':'black','width':4}, 'thickness':0.75, 'value':score}}))
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=score,
+            domain={'x':[0,1],'y':[0,1]},
+            title={'text':"Health Index"},
+            gauge={
+                'axis':{'range':[0,100]},
+                'bar':{'color':col},
+                'steps':[
+                    {'range':[0,25],'color':'#ffcdd2'},
+                    {'range':[25,50],'color':'#ffb74d'},
+                    {'range':[50,75],'color':'#fff3b0'},
+                    {'range':[75,100],'color':'#c8e6c9'}
+                ],
+                'threshold':{'line':{'color':'black','width':4},'thickness':0.75,'value':score}
+            }
+        ))
         fig_gauge.update_layout(height=250, margin=dict(l=20,r=20,t=50,b=20))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
@@ -292,7 +307,7 @@ with col_right:
         st.info("Weather data temporarily unavailable.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Bottom tabs (same as before, keep them)
+# Bottom tabs (as before)
 st.markdown("---")
 st.markdown("## 📈 Analytics & Statistics")
 tab1, tab2, tab3, tab4 = st.tabs(["📋 Evaluation Log", "📊 Optimal Conditions", "📉 Health Trend", "📊 Factor Deviation"])
